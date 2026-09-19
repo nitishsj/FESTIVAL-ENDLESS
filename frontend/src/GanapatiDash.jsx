@@ -18,6 +18,8 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
+  Swords,
+  Skull,
 } from "lucide-react";
 import "./game/game.css";
 
@@ -57,6 +59,7 @@ export default function GanapatiDash() {
   const [isNewBest, setIsNewBest] = useState(false);
   const [toast, setToast] = useState(null);
   const [stageBanner, setStageBanner] = useState(null);
+  const [cinematic, setCinematic] = useState(false);
   const [panel, setPanel] = useState(null); // howto | scores | settings
   const [settings, setSettings] = useState(Storage.getSettings());
   const toastId = useRef(0);
@@ -81,7 +84,7 @@ export default function GanapatiDash() {
       quality,
       onHud: (h) => setHud(h),
       onState: (s, data) => {
-        if (s === "gameover") {
+        if (s === "gameover" || s === "ending") {
           const res = Storage.submit({
             score: data.score,
             combo: data.combo,
@@ -92,7 +95,7 @@ export default function GanapatiDash() {
           setRecord(res.stats);
           setIsNewBest(res.isNewBest);
         }
-        setScreen(s);
+        if (s !== "cinematic") setScreen(s);
       },
       onEvent: (type, data) => {
         switch (type) {
@@ -108,8 +111,6 @@ export default function GanapatiDash() {
           case "BLESSING":
             showToast("✦ GANESHA'S BLESSING ✦", "toast-bless");
             break;
-          case "GOLDEN_END":
-            break;
           case "HIT":
             showToast("OUCH!", "toast-hit");
             break;
@@ -119,9 +120,20 @@ export default function GanapatiDash() {
               "toast-event"
             );
             break;
-          case "STAGE":
-            setStageBanner(data.name);
+          case "CATCH":
+            setCinematic(true);
+            showToast("CAUGHT THE DEMON!", "toast-gold");
+            break;
+          case "ESCAPE":
+            showToast("THE DEMON ESCAPES!", "toast-hit");
+            break;
+          case "LEVEL":
+            setCinematic(false);
+            setStageBanner(`LEVEL ${data.level} · ${data.name}`);
             setTimeout(() => setStageBanner(null), 3200);
+            break;
+          case "ENDING_TRIGGER":
+            setCinematic(true);
             break;
           default:
             break;
@@ -232,10 +244,24 @@ export default function GanapatiDash() {
 
   const startGame = () => {
     audioRef.current?.resume();
-    gameRef.current?.startRun();
+    setCinematic(false);
+    gameRef.current?.startRun(0);
+    setPanel(null);
+  };
+  const playAgain = () => {
+    audioRef.current?.resume();
+    setCinematic(false);
+    gameRef.current?.playAgain();
+    setPanel(null);
+  };
+  const restartFromStart = () => {
+    audioRef.current?.resume();
+    setCinematic(false);
+    gameRef.current?.restartFromStart();
     setPanel(null);
   };
   const backToMenu = () => {
+    setCinematic(false);
     gameRef.current?.toMenu();
     setPanel(null);
   };
@@ -260,7 +286,7 @@ export default function GanapatiDash() {
       <div className="gmd-vignette" />
 
       {/* ===== HUD ===== */}
-      {screen === "playing" && (
+      {screen === "playing" && !cinematic && (
         <div className="gmd-hud" data-testid="hud">
           <div className="hud-top-left">
             <div className="hud-panel">
@@ -282,6 +308,13 @@ export default function GanapatiDash() {
           </div>
 
           <div className="hud-top-center">
+            <div className="hud-level" data-testid="hud-level">
+              <Swords size={14} /> LEVEL {hud.level}
+              <div className="chase-bar">
+                <div className="chase-fill" style={{ width: `${Math.round((hud.chaseProgress || 0) * 100)}%` }} />
+                <Skull size={16} className="chase-demon" style={{ left: `${Math.round((hud.chaseProgress || 0) * 100)}%` }} />
+              </div>
+            </div>
             {hud.combo > 1 && (
               <div
                 key={hud.combo}
@@ -383,10 +416,13 @@ export default function GanapatiDash() {
         </div>
       )}
 
+      {/* ===== cinematic letterbox ===== */}
+      {cinematic && <div className="letterbox" data-testid="letterbox" />}
+
       {/* ===== stage banner ===== */}
       {stageBanner && (
         <div className="stage-banner" data-testid="stage-banner">
-          <span>STAGE</span>
+          <span>CHASE</span>
           {stageBanner}
         </div>
       )}
@@ -447,10 +483,40 @@ export default function GanapatiDash() {
               <div className="go-row pb"><span>Personal Best</span><b>{record.bestScore.toLocaleString()}</b></div>
             </div>
             <div className="go-buttons">
-              <button className="btn btn-primary" data-testid="btn-play-again" onClick={startGame}>
+              <button className="btn btn-primary" data-testid="btn-play-again" onClick={playAgain}>
                 <RotateCcw size={20} /> PLAY AGAIN
               </button>
               <button className="btn btn-ghost" data-testid="btn-main-menu" onClick={backToMenu}>
+                <Home size={20} /> MAIN MENU
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ENDING (final transformation) ===== */}
+      {screen === "ending" && finalStats && (
+        <div className="gmd-overlay center ending-screen" data-testid="ending-screen">
+          <div className="ending-card">
+            <div className="ending-glow">ॐ</div>
+            {isNewBest && (
+              <div className="new-best" data-testid="new-best">✦ NEW PERSONAL BEST! ✦</div>
+            )}
+            <h2 className="ending-title">The Darkness Dissolves</h2>
+            <p className="ending-msg" data-testid="ending-message">
+              “Ganesha doesn’t destroy the obstacle; he removes the darkness within.”
+            </p>
+            <div className="go-stats">
+              <div className="go-row"><span>Distance</span><b>{finalStats.distance} m</b></div>
+              <div className="go-row"><span>Modaks Collected</span><b>{finalStats.modaks}</b></div>
+              <div className="go-row"><span>Highest Combo</span><b>x{finalStats.combo}</b></div>
+              <div className="go-row big"><span>Final Score</span><b>{finalStats.score.toLocaleString()}</b></div>
+            </div>
+            <div className="go-buttons">
+              <button className="btn btn-primary" data-testid="btn-ending-again" onClick={restartFromStart}>
+                <RotateCcw size={20} /> PLAY AGAIN
+              </button>
+              <button className="btn btn-ghost" data-testid="btn-ending-menu" onClick={backToMenu}>
                 <Home size={20} /> MAIN MENU
               </button>
             </div>

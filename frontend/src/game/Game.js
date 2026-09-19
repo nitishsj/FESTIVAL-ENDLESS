@@ -9,12 +9,18 @@ import {
   buildPandal,
   buildArch,
   buildCrowd,
+  buildStone,
+  buildLightning,
+  buildSword,
 } from "./props";
 import { Particles, PetalField } from "./particles";
+import { Demon } from "./demon";
+import { ChaseManager } from "./chase";
+import { MountainBackdrop } from "./mountains";
 
 const LANES = [-2.4, 0, 2.4];
-const GRAVITY = -34;
-const JUMP_V = 12.5;
+const GRAVITY = -38;
+const JUMP_V = 13.6;
 
 const QUALITY = {
   low: { pr: 1, shadow: 0, seg: 5, view: 68, petals: 60, decoStep: 22 },
@@ -101,6 +107,10 @@ export class Game {
     this._initCharacters();
     this._initPools();
     this._initParticles();
+    this.mountains = new MountainBackdrop(this.scene, this.quality);
+    this.LANES = LANES;
+    this.chase = new ChaseManager(this);
+    this.onEnding = opts.onEnding || null;
     this._resetRunVars();
     this._bindResize();
 
@@ -230,6 +240,11 @@ export class Game {
     this.mushika.group.position.set(-1.4, 0, 1.2);
     this.scene.add(this.mushika.group);
     this.mushikaMode = "menu";
+
+    this.demon = new Demon();
+    this.demon.group.position.set(0, 0, -32);
+    this.demon.group.visible = false;
+    this.scene.add(this.demon.group);
   }
 
   _makePool(factory, n) {
@@ -254,6 +269,9 @@ export class Game {
       modak: this._makePool(() => buildModak(false), 40),
       flower: this._makePool(() => buildFlower(), 30),
       golden: this._makePool(() => buildModak(true), 3),
+      stone: this._makePool(() => buildStone(), 8),
+      lightning: this._makePool(() => buildLightning(), 6),
+      sword: this._makePool(() => buildSword(), 6),
     };
     // decorations
     this.decoPools = {
@@ -307,21 +325,102 @@ export class Game {
     this.stageIndex = 0;
     this.stageBlend = 0;
     this._passObstacles = new Set();
+    this.levelSpeedMul = 1;
+    this.cineSpeedMul = 1;
+    this.cineCamPos = null;
+    this.cineCamLook = null;
+    this.endT = 0;
+    this._endShown = false;
   }
 
   // ---------- state control ----------
-  startRun() {
+  startRun(levelIndex = 0) {
     this._clearActive();
     this._resetRunVars();
     this.state = "playing";
+    this._deathLevel = levelIndex;
+    this._endShown = false;
     this.ganesha.group.position.set(0, 0, 0);
-    this.ganesha.group.rotation.set(0, 0, 0);
+    this.ganesha.group.rotation.set(0, Math.PI, 0);
+    this.ganesha.body.scale.set(1, 1, 1);
     this.mushikaMode = "run";
+    this.demon.group.visible = true;
+    this.chase.start(levelIndex);
+    this._setLevelMood(this.chase.level);
     this.audio?.resume();
     this.audio?.startMusic();
     this._prewarm();
     this.onState("playing");
     this._pushHud(true);
+  }
+
+  playAgain() {
+    this.startRun(this._deathLevel ?? 0);
+  }
+
+  // Restart chase from Level 1 (used by the ending's "play again")
+  restartFromStart() {
+    this.startRun(0);
+  }
+
+  _setLevelMood(level) {
+    const map = { 1: 1, 2: 2, 3: 3 };
+    this.stageIndex = map[level] ?? 1;
+    const tint = { 1: 0x3a4a68, 2: 0x33303f, 3: 0x241a2e };
+    const snowTint = { 1: 0xdfe8ff, 2: 0xcfd8ee, 3: 0xbfc0d8 };
+    this.mountains.setTint(tint[level] ?? 0x3a4a68, snowTint[level] ?? 0xffffff);
+    this.mountains.setSnow(level >= 2);
+  }
+
+  beginNextLevel() {
+    this._setLevelMood(this.chase.level);
+    this.state = "playing";
+    this.cineSpeedMul = 1;
+    this.cineCamPos = null;
+    this.onEvent("LEVEL", { level: this.chase.level, name: this.chase.levelName });
+    this.audio?.play("powerup");
+  }
+
+  spawnDemonObstacle(kind, laneI, fromX, fromZ) {
+    const o = this._getFromPool(kind);
+    if (!o) return;
+    const hRule = kind === "sword" ? "high" : kind === "lightning" ? "tall" : "full";
+    const x = kind === "sword" ? 0 : LANES[laneI];
+    const y = kind === "sword" ? 1.35 : 0;
+    o.position.set(x, y, (fromZ ?? -30) + 2);
+    o.userData.hRule = hRule;
+    o.userData.collected = false;
+    o.userData.passed = false;
+    o.userData.spin = 0;
+    o.userData.grow = 0;
+    o.scale.setScalar(0.01);
+    this.activeObjects.push(o);
+  }
+
+  setCinematicCam(pos, look) {
+    this.cineCamPos = pos;
+    this.cineCamLook = look;
+  }
+
+  // ===== MODULAR ENDING INTEGRATION POINT =====
+  // LEVEL_3_COMPLETE -> DEMON_CAUGHT_FINAL -> TRIGGER_ENDING_SEQUENCE
+  // Replace/extend the built-in transformation by supplying opts.onEnding.
+  triggerEnding() {
+    if (this.state === "ending") return;
+    this.state = "ending";
+    this.endT = 0;
+    this._endShown = false;
+    this.cineSpeedMul = 0;
+    const stats = {
+      score: Math.floor(this.score),
+      distance: Math.floor(this.distance),
+      combo: this.maxCombo,
+      modaks: this.modaksCollected,
+    };
+    this.onEvent("ENDING_TRIGGER", stats);
+    this.audio?.stopMusic();
+    this.audio?.play("blessing");
+    if (this.onEnding) this.onEnding(stats);
   }
 
   // populate the visible stretch so the world never starts empty
@@ -345,8 +444,11 @@ export class Game {
     this.stageIndex = 0;
     this.ganesha.group.position.set(0.3, 0, 0);
     this.ganesha.group.rotation.set(0, -0.5, 0);
+    this.ganesha.body.scale.set(1, 1, 1);
     this.mushika.group.position.set(-1.4, 0, 1.2);
     this.mushikaMode = "menu";
+    this.demon.group.visible = false;
+    this.mountains.setSnow(false);
     this.audio?.stopMusic();
     this.onState("menu");
   }
@@ -354,14 +456,17 @@ export class Game {
   gameOver() {
     this.state = "gameover";
     this.mushikaMode = "gameover";
+    this.demon.group.visible = false;
     this.audio?.stopMusic();
     this.audio?.play("gameover");
     this.ganesha.group.rotation.set(0, 0, 0);
+    this.ganesha.body.scale.set(1, 1, 1);
     this.onState("gameover", {
       score: Math.floor(this.score),
       distance: Math.floor(this.distance),
       combo: this.maxCombo,
       modaks: this.modaksCollected,
+      level: this.chase?.level ?? 1,
     });
   }
 
@@ -463,56 +568,22 @@ export class Game {
   }
 
   _spawnRow() {
+    // Obstacles are placed by the Demon (see ChaseManager). Rows are now
+    // collectibles only — modaks, marigolds and the rare golden modak.
     const z = -this.q.view;
     const diff = Math.min(1, (this.speed - this.baseSpeed) / 16);
+    const lane = Math.floor(Math.random() * 3);
     const roll = Math.random();
-
-    // decide row type: obstacle or collectible-heavy
-    if (roll < 0.62) {
-      // obstacle row
-      const kind = Math.random();
-      if (kind < 0.28 && diff > 0.15) {
-        // full-width duck garland (high) — leave it, duck under
-        const o = this._getFromPool("high");
-        if (o) this._place(o, LANES[1], z, "high");
-        // reward flowers just after
-        this._collectibleLine(1, z - 4, "flower", 3);
-      } else if (kind < 0.5 && diff > 0.2) {
-        // low barrier across — jump over
-        const o = this._getFromPool("low");
-        if (o) this._place(o, LANES[1], z, "low");
-        this._collectibleArc(Math.floor(Math.random() * 3), z - 3);
-      } else {
-        // 1 or 2 blocking obstacles leaving open lane(s)
-        const blockCount = diff > 0.4 && Math.random() < 0.5 ? 2 : 1;
-        const lanesArr = [0, 1, 2];
-        for (let b = 0; b < blockCount; b++) {
-          if (lanesArr.length <= 1) break;
-          const idx = Math.floor(Math.random() * lanesArr.length);
-          const laneI = lanesArr.splice(idx, 1)[0];
-          const types = ["drum", "box", "cart"];
-          const t = types[Math.floor(Math.random() * types.length)];
-          const o = this._getFromPool(t);
-          if (o) this._place(o, LANES[laneI], z, "full");
-        }
-        // collectibles in an open lane
-        const openLane = lanesArr[Math.floor(Math.random() * lanesArr.length)] ?? 1;
-        this._collectibleLine(openLane, z, "modak", 4);
-      }
+    if (roll < 0.4) {
+      this._collectibleArc(lane, z);
+    } else if (roll < 0.72) {
+      this._collectibleLine(lane, z, "modak", 4);
     } else {
-      // collectible row
-      const lane = Math.floor(Math.random() * 3);
-      const flowerRow = Math.random() < 0.4;
-      if (flowerRow) {
-        this._collectibleLine(lane, z, "flower", 5);
-      } else {
-        this._collectibleArc(lane, z);
-      }
-      // rare golden modak
-      if (Math.random() < 0.07 + diff * 0.05) {
-        const g = this._getFromPool("golden");
-        if (g) this._place(g, LANES[Math.floor(Math.random() * 3)], z - 2, "golden");
-      }
+      this._collectibleLine(lane, z, "flower", 5);
+    }
+    if (Math.random() < 0.07 + diff * 0.05) {
+      const g = this._getFromPool("golden");
+      if (g) this._place(g, LANES[Math.floor(Math.random() * 3)], z - 2, "golden");
     }
   }
 
@@ -609,14 +680,91 @@ export class Game {
       this._updatePlaying(dt);
     } else if (this.state === "menu") {
       this._updateMenu(dt);
+    } else if (this.state === "cinematic") {
+      this._updateCinematic(dt);
+    } else if (this.state === "ending") {
+      this._updateEnding(dt);
     } else {
       this._updateGameOver(dt);
     }
 
     this.particles.update(dt);
     this.petals.update(dt, this.state === "playing" ? this.speed : 4);
+    this.mountains.update(dt, this.ganesha.group.position.x);
     this._updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _updateCinematic(dt) {
+    const s = this.speed * (this.cineSpeedMul ?? 1);
+    this._scrollGround(dt, s);
+    this._moveObjects(dt, s);
+    this._moveDeco(dt, s);
+    this.ganesha.group.position.x = this.px;
+    this.ganesha.group.position.y = this.py;
+    this.ganesha.group.rotation.y = Math.PI;
+    this.ganesha.update(dt, { running: s > 2, grounded: true, blessing: 0 });
+    this.ganesha.body.scale.set(1, 1, 1);
+    this._updateMushikaRun(dt, s);
+    this._lerpTheme(dt, STAGES[this.stageIndex]);
+    this.chase.updateCinematic(dt);
+    this._pushHud();
+  }
+
+  _updateEnding(dt) {
+    this.endT += dt;
+    const t = this.endT;
+    // Ganesha faces the demon ahead, radiant with blessing
+    this.ganesha.group.position.x = this.px;
+    this.ganesha.group.position.y = 0;
+    this.ganesha.group.rotation.y = Math.PI;
+    this.ganesha.update(dt, { running: false, blessing: 1 });
+    this.ganesha.body.scale.set(1, 1, 1);
+
+    // Demon pulled in front, softening into a calm glowing form
+    const tr = Math.min(1, Math.max(0, (t - 1.0) / 3.5));
+    this.demon.group.position.x += (this.px - this.demon.group.position.x) * Math.min(1, dt * 2);
+    this.demon.group.position.z += (-3.4 - this.demon.group.position.z) * Math.min(1, dt * 2);
+    this.demon.group.position.y = tr * (1.3 + Math.sin(t * 2) * 0.15);
+    this.demon.group.rotation.y += (0 - this.demon.group.rotation.y) * Math.min(1, dt * 3);
+    this.demon.update(dt, { running: false, transform: tr, caught: 1 - tr });
+
+    // Mushika celebrates beside Ganesha
+    this.mushika.group.position.lerp(new THREE.Vector3(this.px + 1.3, 0, 0.6), dt * 3);
+    this.mushika.group.rotation.y = Math.PI;
+    this.mushika.update(dt, { running: false, baseY: 0, celebrate: true });
+
+    // Golden divine wave + softening sparkles
+    this._pWave = (this._pWave || 0) + dt;
+    if (this._pWave > 0.08 && t > 0.6 && t < 6) {
+      this._pWave = 0;
+      this.particles.burst("gold", new THREE.Vector3(this.px, 1.4, -1.2), {
+        speed: 5, up: 2, life: 1.3, spread: 2.6, gravity: -0.6,
+      });
+      if (tr > 0.1) {
+        this.particles.burst("white", this.demon.group.position.clone().add(new THREE.Vector3(0, 1, 0)), {
+          speed: 2, up: 1.4, life: 1.1, spread: 1.6, gravity: -0.6,
+        });
+      }
+    }
+    this._scrollGround(dt, 0);
+    this._lerpTheme(dt, STAGES[this.stageIndex]);
+
+    // slow cinematic push-in
+    this.setCinematicCam(
+      new THREE.Vector3(this.px + 1.6, 2.2, Math.max(2.4, 3.6 - t * 0.2)),
+      new THREE.Vector3(this.px, 1.5, -2)
+    );
+
+    if (t > 6.3 && !this._endShown) {
+      this._endShown = true;
+      this.onState("ending", {
+        score: Math.floor(this.score),
+        distance: Math.floor(this.distance),
+        combo: this.maxCombo,
+        modaks: this.modaksCollected,
+      });
+    }
   }
 
   _updateMenu(dt) {
@@ -647,8 +795,9 @@ export class Game {
   }
 
   _updatePlaying(dt) {
-    // speed ramp
-    this.speed = Math.min(30, this.baseSpeed + this.distance * 0.006);
+    // speed ramp (scaled by the current level)
+    this.speed =
+      Math.min(30, this.baseSpeed + this.distance * 0.006) * (this.levelSpeedMul ?? 1);
     let effSpeed = this.speed;
 
     // events
@@ -665,7 +814,7 @@ export class Game {
       effSpeed *= 0.55;
     }
 
-    this.distance += effSpeed * dt * 0.5;
+    this.distance += effSpeed * dt * 0.8;
 
     // score
     let scoreRate = effSpeed * 1.2;
@@ -738,6 +887,7 @@ export class Game {
     // character
     this.ganesha.group.position.x = this.px;
     this.ganesha.group.position.y = this.py;
+    this.ganesha.group.rotation.y = Math.PI; // face forward (running away from camera)
     this.ganesha.update(dt, {
       running: true,
       grounded: this.grounded,
@@ -746,11 +896,23 @@ export class Game {
       blessing: this.blessingActive > 0 ? 1 : 0,
       stumble: Math.max(0, this.stumble * 2),
     });
+    // squash & stretch for juicy jump/land
+    let stretchY;
+    if (!this.grounded) {
+      stretchY = THREE.MathUtils.clamp(1 + this.vy * 0.012, 0.9, 1.14);
+    } else {
+      stretchY = 1 - (this._squash > 0 ? this._squash * 0.22 : 0);
+    }
+    const w = 1 + (1 - stretchY) * 0.5;
+    this.ganesha.body.scale.set(w, stretchY, w);
+
+    // demon chase AI (runs ahead, places obstacles, drives level progress)
+    this.chase.updateChase(dt, effSpeed);
 
     // mushika runs alongside / ahead
     this._updateMushikaRun(dt, effSpeed);
 
-    // stage progression
+    // theme mood lerp
     this._updateStage(dt);
 
     // collisions & collection
@@ -815,8 +977,22 @@ export class Game {
           );
         }
       } else if (type === "obstacle") {
-        if (o.userData.hRule === "high") {
-          // gentle sway
+        // materialize (demon-created) with a quick grow-in
+        if (o.userData.grow !== undefined && o.userData.grow < 1) {
+          o.userData.grow = Math.min(1, o.userData.grow + dt * 4);
+          o.scale.setScalar(o.userData.grow);
+        }
+        const kind = o.userData.kind;
+        if (kind === "lightning") {
+          const flick = 0.6 + Math.random() * 0.5;
+          if (o.userData.bolt) o.userData.bolt.children.forEach((c) => (c.material.opacity = flick));
+          if (o.userData.light) o.userData.light.intensity = 1.6 + Math.random() * 1.4;
+          if (o.userData.ring) o.userData.ring.rotation.z += dt * 3;
+        } else if (kind === "sword") {
+          o.position.y = 1.35 + Math.sin(this.clock.elapsedTime * 3) * 0.06;
+          o.rotation.z = Math.sin(this.clock.elapsedTime * 2) * 0.05;
+          if (o.userData.glow) o.userData.glow.material.opacity = 0.4 + Math.abs(Math.sin(this.clock.elapsedTime * 4)) * 0.4;
+        } else if (o.userData.hRule === "high") {
           o.rotation.z = Math.sin(this.clock.elapsedTime * 2) * 0.03;
         }
       }
@@ -857,16 +1033,7 @@ export class Game {
   }
 
   _updateStage(dt) {
-    const thresholds = [0, 380, 850, 1400];
-    let idx = 0;
-    for (let i = 0; i < thresholds.length; i++) {
-      if (this.distance >= thresholds[i]) idx = i;
-    }
-    if (idx !== this.stageIndex) {
-      this.stageIndex = idx;
-      this.onEvent("STAGE", { name: STAGES[idx].name, index: idx });
-      this.audio?.play("bell");
-    }
+    // stage index (visual mood) is driven by the chase level via _setLevelMood
     this._lerpTheme(dt, STAGES[this.stageIndex]);
   }
 
@@ -922,6 +1089,9 @@ export class Game {
       const type = o.userData.type;
 
       if (type === "obstacle") {
+        const kind = o.userData.kind;
+        const wide = o.userData.hRule === "high"; // sword / garland span all lanes
+        const inX = wide ? true : dx < 1.3;
         // near-miss detection when passing in adjacent lane
         if (!o.userData.passed && dz > 0.6) {
           o.userData.passed = true;
@@ -929,20 +1099,23 @@ export class Game {
           const wasDanger =
             (o.userData.hRule === "high" && this.ducking) ||
             (o.userData.hRule === "low" && !this.grounded) ||
+            (o.userData.hRule === "tall" && laneDx > 1.4) ||
             (o.userData.hRule === "full" && !this.grounded);
           if ((laneDx < 1.4 && dx < 1.4) || wasDanger) {
             if (this.invuln <= 0) this._nearMiss(o);
           }
         }
         // collision window
-        if (dz > -0.9 && dz < 0.9 && dx < 1.3 && this.invuln <= 0) {
+        if (dz > -0.9 && dz < 0.9 && inX && this.invuln <= 0) {
           let hit = false;
           if (o.userData.hRule === "high") {
-            if (!this.ducking) hit = true;
+            if (!this.ducking) hit = true; // must slide/duck under sword
           } else if (o.userData.hRule === "low") {
-            if (this.py < 0.55) hit = true;
+            if (this.py < 0.55) hit = true; // must jump
+          } else if (o.userData.hRule === "tall") {
+            hit = true; // lightning: can only be avoided by changing lane
           } else {
-            // full
+            // full (stone) — jump over or dodge
             if (this.py < 1.05) hit = true;
           }
           if (hit) this._takeHit(o);
@@ -1037,6 +1210,17 @@ export class Game {
   // ---------- camera ----------
   _updateCamera(dt) {
     const t = this.clock.elapsedTime;
+    if (this.state === "cinematic" || this.state === "ending") {
+      if (this.cineCamPos) {
+        this.camera.position.lerp(this.cineCamPos, Math.min(1, dt * 2.5));
+        if (this.cineCamLook) this.camera.lookAt(this.cineCamLook);
+      }
+      this.camera.fov += (58 - this.camera.fov) * Math.min(1, dt * 2);
+      this.camera.updateProjectionMatrix();
+      this.sun.position.set(this.px + 6, 14, 4);
+      this.sun.target.position.set(this.px, 0, -6);
+      return;
+    }
     if (this.state === "menu") {
       const r = 9;
       this.camera.position.set(
@@ -1097,6 +1281,9 @@ export class Game {
       golden: this.goldenTime > 0,
       event: this.activeEvent,
       stage: STAGES[this.stageIndex].name,
+      level: this.chase?.level ?? 1,
+      levelName: this.chase?.levelName ?? "",
+      chaseProgress: this.chase?.progress ?? 0,
     });
   }
 

@@ -359,3 +359,133 @@ export function buildCrowd() {
   }
   return g;
 }
+
+// ---------- DEMON-THROWN OBSTACLES ----------
+
+// Large rock/boulder — dodge by lane or jump. hRule "full".
+export function buildStone() {
+  const g = new THREE.Group();
+  const rockMat = new THREE.MeshStandardMaterial({
+    color: 0x6b6a72,
+    roughness: 1,
+    metalness: 0.05,
+    flatShading: true,
+  });
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(0.62, 1), rockMat);
+  // jitter vertices for a natural boulder
+  const pos = rock.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setXYZ(
+      i,
+      pos.getX(i) * (0.85 + Math.random() * 0.4),
+      pos.getY(i) * (0.85 + Math.random() * 0.4),
+      pos.getZ(i) * (0.85 + Math.random() * 0.4)
+    );
+  }
+  rock.geometry.computeVertexNormals();
+  rock.position.y = 0.55;
+  rock.scale.set(1.25, 1, 1.1);
+  rock.castShadow = true;
+  g.add(rock);
+  const moss = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.66, 1),
+    new THREE.MeshStandardMaterial({ color: 0x4a5a34, roughness: 1, flatShading: true, transparent: true, opacity: 0.5 })
+  );
+  moss.position.y = 0.62;
+  moss.scale.set(1.2, 0.5, 1.05);
+  g.add(moss);
+  g.userData.type = "obstacle";
+  g.userData.kind = "stone";
+  return g;
+}
+
+// Crackling lightning pillar — dodge by switching lane only (tall). hRule "tall".
+export function buildLightning() {
+  const g = new THREE.Group();
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0x8ad8ff,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  // jagged bolt built from thin segments
+  const bolt = new THREE.Group();
+  let y = 0.1;
+  let x = 0;
+  for (let i = 0; i < 7; i++) {
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 6), glowMat);
+    const nx = (Math.random() - 0.5) * 0.4;
+    seg.position.set((x + nx) / 2, y + 0.25, 0);
+    seg.rotation.z = (nx) * 1.2;
+    bolt.add(seg);
+    x = nx;
+    y += 0.45;
+  }
+  g.add(bolt);
+  g.userData.bolt = bolt;
+  // core glow column
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 3.4, 10), glowMat.clone());
+  core.material.opacity = 0.35;
+  core.position.y = 1.7;
+  g.add(core);
+  // ground burst ring
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.3, 0.62, 24),
+    new THREE.MeshBasicMaterial({ color: 0x8ad8ff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.05;
+  g.add(ring);
+  g.userData.ring = ring;
+  // point light for real-time glow
+  const light = new THREE.PointLight(0x66ccff, 2.2, 8);
+  light.position.y = 1.6;
+  g.add(light);
+  g.userData.light = light;
+  g.userData.type = "obstacle";
+  g.userData.kind = "lightning";
+  return g;
+}
+
+// Floating warrior sword held horizontally — slide/duck underneath. hRule "high".
+export function buildSword() {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0xd7dbe4, roughness: 0.25, metalness: 0.95 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xffcf5c, roughness: 0.3, metalness: 0.9 });
+  // blade spans across the lanes horizontally
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.1, 0.26), steel);
+  blade.castShadow = true;
+  g.add(blade);
+  // blade edge taper (tip)
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.5, 4), steel);
+  tip.rotation.z = -Math.PI / 2;
+  tip.position.x = 2.95;
+  g.add(tip);
+  // fuller groove
+  const groove = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.03, 0.06), gold);
+  groove.position.y = 0.02;
+  g.add(groove);
+  // guard + hilt on the left end
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.5), gold);
+  guard.position.x = -2.75;
+  g.add(guard);
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 10), new THREE.MeshStandardMaterial({ color: 0x5a2a16, roughness: 0.7 }));
+  grip.rotation.z = Math.PI / 2;
+  grip.position.x = -3.1;
+  g.add(grip);
+  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), gold);
+  pommel.position.x = -3.42;
+  g.add(pommel);
+  // menacing glow edge
+  const glow = new THREE.Mesh(
+    new THREE.BoxGeometry(5.4, 0.04, 0.34),
+    new THREE.MeshBasicMaterial({ color: 0xff6644, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  glow.position.y = -0.05;
+  g.add(glow);
+  g.userData.glow = glow;
+  g.userData.type = "obstacle";
+  g.userData.kind = "sword";
+  return g;
+}

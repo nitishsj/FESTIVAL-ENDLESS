@@ -129,6 +129,46 @@
   align-items: center;
   gap: 8px;
 }
+.hud-level {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-family: "Baloo 2", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--gold);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-brd);
+  padding: 7px 16px;
+  border-radius: 16px;
+}
+.chase-bar {
+  position: relative;
+  width: min(260px, 60vw);
+  height: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: visible;
+  margin-top: 2px;
+}
+.chase-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #ff8a2a, #ff3d3d);
+  transition: width 0.2s linear;
+}
+.chase-demon {
+  position: absolute;
+  top: -5px;
+  transform: translateX(-50%);
+  color: #ff5566;
+  filter: drop-shadow(0 0 5px rgba(255, 60, 60, 0.9));
+  transition: left 0.2s linear;
+}
 .hud-combo {
   font-size: 40px;
   color: var(--gold);
@@ -644,6 +684,63 @@
   border-radius: 12px;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* ===== cinematic letterbox ===== */
+.letterbox {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  animation: fadeIn 0.5s ease;
+}
+.letterbox::before,
+.letterbox::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 11vh;
+  background: #060309;
+}
+.letterbox::before { top: 0; }
+.letterbox::after { bottom: 0; }
+
+/* ===== ending (transformation) ===== */
+.ending-screen {
+  background: radial-gradient(120% 90% at 50% 45%, rgba(60, 40, 10, 0.35), rgba(10, 4, 12, 0.82));
+}
+.ending-card {
+  background: var(--glass);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-brd);
+  border-radius: 26px;
+  padding: 34px 38px;
+  width: min(480px, 92vw);
+  text-align: center;
+  box-shadow: 0 0 80px rgba(255, 190, 70, 0.35), 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: cardIn 0.6s cubic-bezier(0.2, 0.8, 0.3, 1.2);
+}
+.ending-glow {
+  font-size: 64px;
+  color: var(--gold);
+  text-shadow: 0 0 40px rgba(255, 200, 90, 0.9);
+  animation: floaty 2.4s ease-in-out infinite;
+  margin-bottom: 6px;
+}
+.ending-title {
+  font-family: "Baloo 2", sans-serif;
+  font-weight: 800;
+  font-size: 30px;
+  color: #fff;
+  margin: 0 0 12px;
+}
+.ending-msg {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--gold);
+  font-style: italic;
+  margin: 0 0 22px;
 }
 
 @media (max-width: 640px) {

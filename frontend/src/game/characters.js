@@ -354,7 +354,7 @@ export class Ganesha {
     // lean into lane changes
     this.lean += (this.leanTarget - this.lean) * Math.min(1, dt * 10);
     this.leanTarget *= Math.max(0, 1 - dt * 4);
-    this.body.rotation.z = -this.lean;
+    this.body.rotation.z = this.lean;
 
     // head gentle sway + trunk sway
     if (this.head) {
