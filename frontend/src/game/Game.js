@@ -116,6 +116,8 @@ export class Game {
 
     this.loop = this.loop.bind(this);
     this._raf = requestAnimationFrame(this.loop);
+    // QA/debug handle (client-only game, harmless): lets tests inspect/advance state
+    if (typeof window !== "undefined") window.__gmd = this;
   }
 
   _initRenderer() {
